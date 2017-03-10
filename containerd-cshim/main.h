@@ -63,6 +63,7 @@ struct process {
 	struct checkpoint checkpoint;
 	int container_pid;
 	struct io io;
+	int stdin_closer;
 	struct pipe pipe;
 	int	shim_signal;
 	pid_t shim_pid;

@@ -192,6 +192,11 @@ int open_io(struct process* p) {
 	int gid = p->state.root_gid;
 	int *master = &p->console;
 
+	p->stdin_closer = open(p->state.containerd_stdin, O_WRONLY);
+	if (p->stdin_closer < 0) {
+		return -1;
+	}
+
 	if (p->state.terminal == true) {
 		p->console_path =(char *)malloc(100*sizeof(char*));
 		memset((void*)p->console_path, 0, 100);
@@ -358,7 +363,7 @@ int start(struct process* p){
 		return err;
 	}
 
-	if (mainloop_add_handler(&epfd, p->control_fd, control_handler, &p->console)) {
+	if (mainloop_add_handler(&epfd, p->control_fd, control_handler, p)) {
 		write_message("error", "add contorl handler failed");
 		return err;
 	}
@@ -481,6 +486,7 @@ int write_exit_status(int status)
 		return -1;
 	}
 	dprintf(fd, "%d", status);
+	close(fd);
 	return 0;
 }
 
@@ -765,7 +771,7 @@ int io_copy_handler(int fd, uint32_t events, void *data, int *epfd) {
 	}
 
 	if (w != r) {
-		write_message("error", "console short writer:%d w:%d", r, w);
+		write_message("error", "console short writer: %d w: %d", r, w);
 	}
 	return 0;
 }
@@ -788,20 +794,15 @@ int signal_handler(int fd, uint32_t events, void *data, int *epfd) {
 			break;
 		}
 
-		if (siginfo.ssi_signo != SIGCHLD) {
-			kill(pid, siginfo.ssi_signo);
-			DEBUG("forwarded signal %d to pid %d",
-			      siginfo.ssi_signo, pid);
-			continue;
-		}
-
-		if (siginfo.ssi_signo == SIGCHLD) {
+		for (;;) {
 			reap_pid = waitpid(-1, &wstatus, WNOHANG);
+			if (reap_pid <= 0)
+				break;
 			DEBUG("get SIGCHLD signal, reap pid = %d", reap_pid);
 			if ((reap_pid > 0) && (reap_pid == pid)) {
 				status = WEXITSTATUS(wstatus);
 				if (WIFSIGNALED(wstatus)) {
-					status += 128;;
+					status += 128;
 				}
 				write_exit_status(status);
 				return 2;
@@ -812,7 +813,7 @@ int signal_handler(int fd, uint32_t events, void *data, int *epfd) {
 }
 
 int control_handler(int fd, uint32_t events, void *data, int *epfd) {
-	int master = *(int *)data;
+	struct process  *p = (struct process*)data;
 	char buf[1024];
 	int msg, w, h;
 	struct winsize wsz;
@@ -832,10 +833,12 @@ int control_handler(int fd, uint32_t events, void *data, int *epfd) {
 	switch (msg){
 	case 0:
 		// close stdin
+		if (p->stdin_closer >= 0)
+			close(p->stdin_closer);
 		break;
 	case 1:
 		// 修改tty的size
-		ioctl(master, TIOCSWINSZ, &wsz);
+		ioctl(p->console, TIOCSWINSZ, &wsz);
 		break;
 	}
 
@@ -862,11 +865,8 @@ int get_signal_fd(int *signal_fd)
 	int err;
 	sigset_t mask;
 
-	err = sigfillset(&mask);
-	if (err < 0) {
-		write_message("error", "sigemptyset");
-		return -1;
-	}
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGCHLD);
 	err = sigprocmask(SIG_BLOCK, &mask, NULL);
 	if (err < 0) {
 		write_message("error", "sigprocmask");
