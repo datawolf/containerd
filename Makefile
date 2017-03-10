@@ -29,7 +29,7 @@ DOCKER_RUN := docker run --privileged --rm -i $(DOCKER_FLAGS) "$(DOCKER_IMAGE)"
 
 export GOPATH:=$(CURDIR)/vendor:$(GOPATH)
 
-all: client daemon shim
+all: client daemon cshim
 
 static: client-static daemon-static shim-static
 
@@ -54,6 +54,8 @@ daemon-static:
 shim: bin
 	cd containerd-shim && go build -tags "$(BUILDTAGS)" -ldflags "-w ${LDFLAGS}" -o ../bin/containerd-shim
 
+cshim: bin
+	cd containerd-cshim &&  make
 shim-static:
 	cd containerd-shim && go build -ldflags "-w -extldflags -static ${LDFLAGS}" -tags "$(BUILDTAGS)" -o ../bin/containerd-shim
 
