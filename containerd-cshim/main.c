@@ -86,7 +86,7 @@ int main(int argc, char **argv)
 	struct process process;
 
 	// FOR debug
-	slog = open("/var/run/docker/libcontainerd/shim.log",
+	slog = open("/tmp/shim.log",
 		    O_APPEND | O_CREAT | O_SYNC| O_WRONLY, 0666);
 	if (slog == -1) {
 		write_message("error", "Failed to open shim.log file");
@@ -303,7 +303,7 @@ int start(struct process* p){
 	}
 
 	if (p->state.exec == true) {
-		if ((err = append_args(&exec_args, 5, "exec", "--process", process_path,
+		if ((err = append_args(&exec_args, 6, "exec", "-d", "--process", process_path,
 			"--console", p->console_path == NULL ? "foo": p->console_path)) < 0)
 			return err;
 	}else if (strlen(p->state.checkpoint) > 0) {
@@ -336,7 +336,7 @@ int start(struct process* p){
 				return err;
 		}
 	}else{
-		if ((err = append_args(&exec_args, 5, "start",
+		if ((err = append_args(&exec_args, 5, "create",
 				 "--bundle", p->bundle,
 				 "--console", p->console_path == NULL ? "foo": p->console_path)) < 0)
 			return err;
@@ -346,7 +346,7 @@ int start(struct process* p){
 		}
 	}
 
-	if ((err = append_args(&exec_args, 4, "-d", "--pid-file", pid_path, p->id)) < 0)
+	if ((err = append_args(&exec_args, 3, "--pid-file", pid_path, p->id)) < 0)
 		return err;
 
 	exec_args.args = (char **)append_null_to_array((void **)exec_args.args,
@@ -802,7 +802,7 @@ int signal_handler(int fd, uint32_t events, void *data, int *epfd) {
 			if ((reap_pid > 0) && (reap_pid == pid)) {
 				status = WEXITSTATUS(wstatus);
 				if (WIFSIGNALED(wstatus)) {
-					status += 128;
+					status += WTERMSIG(wstatus) + 128;
 				}
 				write_exit_status(status);
 				return 2;
