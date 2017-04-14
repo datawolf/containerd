@@ -1,0 +1,90 @@
+From 067c87080833159c403021e4ba51c51e5d155962 Mon Sep 17 00:00:00 2001
+From: Wang Long <long.wanglong@huawei.com>
+Date: Fri, 14 Apr 2017 17:39:29 +0800
+Subject: [PATCH 2/2] fix console issue
+
+Signed-off-by: Wang Long <long.wanglong@huawei.com>
+---
+ containerd-shim/process_linux.go | 66 +++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 65 insertions(+), 1 deletion(-)
+
+diff --git a/containerd-shim/process_linux.go b/containerd-shim/process_linux.go
+index c1eaced..c6ca169 100644
+--- a/containerd-shim/process_linux.go
++++ b/containerd-shim/process_linux.go
+@@ -177,7 +177,71 @@ func (p *process) recvtty(msg chan string) {
+ 		f1, _ := os.Create("/root/shim2.log")
+ 		fmt.Fprintf(f1, "LOG2:\n")
+ 		defer f1.Close()
+-		io.Copy(stdout, master)
++		epollFd, _ := syscall.EpollCreate1(0)
++		fmt.Fprintf(f1, "create epoll\n")
++		syscall.EpollCtl(epollFd, syscall.EPOLL_CTL_ADD, int(master.Fd()),
++			//	&syscall.EpollEvent{Events: syscall.EPOLLIN | syscall.EPOLLOUT, Fd: int32(master.Fd())})
++			&syscall.EpollEvent{Events: syscall.EPOLLIN | syscall.EPOLLOUT | syscall.EPOLLRDHUP | 1<<31, Fd: int32(master.Fd())})
++		fmt.Fprintf(f1, "add epollout and epollhup\n")
++		events := make([]syscall.EpollEvent, 16)
++		var exit bool
++		for {
++			exit = false
++			fmt.Fprintf(f1, "epollwait\n")
++			n, _ := syscall.EpollWait(epollFd, events, -1)
++			for _, ev := range events[:n] {
++				fmt.Fprintf(f1, "\tprocess events: %#v count = %d\n", ev.Events, n)
++				if ev.Events == syscall.EPOLLIN || ev.Events == syscall.EPOLLOUT {
++					fmt.Fprintf(f1, "\tepoll out\n")
++					buf := make([]byte, 32*1024)
++					for {
++						nr, er := master.Read(buf)
++						if nr > 0 {
++							nw, ew := stdout.Write(buf[0:nr])
++							if ew != nil {
++								break
++							}
++							if nr != nw {
++								break
++							}
++						}
++						if er != nil {
++							break
++						}
++					}
++				}
++				if ev.Events == syscall.EPOLLIN|syscall.EPOLLHUP {
++					fmt.Fprintf(f1, "\tepoll hup and in\n")
++					break
++				}
++				if ev.Events == syscall.EPOLLOUT|syscall.EPOLLHUP {
++					fmt.Fprintf(f1, "\tepoll hup and out\n")
++					break
++				}
++
++				if ev.Events == syscall.EPOLLHUP {
++					fmt.Fprintf(f1, "\tepoll hup\n")
++					exit = true
++					break
++				}
++				if ev.Events == syscall.EPOLLRDHUP {
++					fmt.Fprintf(f1, "\tepoll hup\n")
++					exit = true
++					break
++				}
++
++				if ev.Events&syscall.EPOLLERR != 0 {
++					fmt.Fprintf(f1, "\tepoll err\n")
++					exit = true
++					break
++				}
++
++			}
++			if exit == true {
++				fmt.Fprintf(f1, "exit epoll\n")
++				break
++			}
++		}
+ 		fmt.Fprintf(f1, "io.Copy(stdout,master) returned\n")
+ 		master.Close()
+ 		p.Done()
+-- 
+2.7.4
+
