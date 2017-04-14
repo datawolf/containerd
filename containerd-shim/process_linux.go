@@ -49,7 +49,13 @@ func (p *process) openIO() error {
 		if err != nil {
 			return err
 		}
-		go io.Copy(master, stdin)
+		go func() {
+			f, _ := os.Create("/root/shim1.log")
+			fmt.Fprintf(f, "LOG1:\n")
+			defer f.Close()
+			io.Copy(master, stdin)
+			fmt.Fprintf(f, "io.Copy(master,stdin) returned\n")
+		}()
 		stdoutw, err := fifo.OpenFifo(ctx, p.state.Stdout, syscall.O_WRONLY, 0)
 		if err != nil {
 			return err
@@ -60,7 +66,11 @@ func (p *process) openIO() error {
 		}
 		p.Add(1)
 		go func() {
+			f1, _ := os.Create("/root/shim2.log")
+			fmt.Fprintf(f1, "LOG2:\n")
+			defer f1.Close()
 			io.Copy(stdoutw, master)
+			fmt.Fprintf(f1, "io.Copy(stdout,master) returned\n")
 			master.Close()
 			stdoutr.Close()
 			stdoutw.Close()
